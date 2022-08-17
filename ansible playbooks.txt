@@ -1,0 +1,288 @@
+********How to install any software/tool********
+---
+- hosts: test
+  tasks:
+    - name: install httpd
+      yum: name=httpd state=installed
+      tags: httpd
+    - name: start httpd service
+      service: name=httpd state=started
+      tags: httpd
+    - name: install java-11
+      yum: name=java-11 state=installed
+      tags: java
+
+# ansible -m setup all (setup is a module that will be runned defaultly every time. This module will gather facts of agents/slaves)
+# ansible-playbook playbook.yaml --syntax-check
+# ansible-playbook playbook.yaml --check (dry run)
+# ansible-playbook playbook.yaml --step (interactive mode)
+# ansible-playbook playbook.yaml --list-tasks
+# ansible-playbook playbook.yaml --list-tags
+# ansible-playbook playbook.yaml --tags httpd(or httpd,..)
+# ansible-playbook playbook.yaml --skip-tags httpd
+
+********item variable - create group and users *********
+---
+- hosts: all
+  tasks:
+    - name: create group
+      group: name=devops state=present
+    - name: change groupid of devops
+      shell: groupmod -g 2200 devops
+    - name: create users vidu,mona,sabrina,selena,ariana
+      user: name={{ item.uname }} uid={{ item.uid }} groups={{ item.group }} state=present
+      with_items:
+        - { uname: vidu, uid: 22001, group: "devops" }
+        - { uname: mona, uid: 22002, group: "devops" }
+        - { uname: sabrina, uid: 22003, group: "devops" }
+        - { uname: selena, uid: 22004, group: "devops" }
+        - { uname: ariana, uid: 22005, group: "devops" }
+    - name: change default groupids and groupnames
+      shell: usermod -g devops {{ item }}
+      with_items:
+        - vidu
+        - mona
+        - sabrina
+        - selena
+        - ariana
+
+********ignore errors********
+---
+- hosts: all
+  tasks:
+    - name: checking file path
+      shell: ls -l /tmp/file1
+      ignore_errors: yes
+    - name: install git
+      yum: name=git state=installed
+
+********block and rescue********
+---
+- hosts: all
+  tasks:
+    - name:
+      block:
+        - name: checking file path
+          shell: ls -l /tmp/file1
+      rescue:
+        - name: create file1
+          file: name=/tmp/file1 state=touch
+    - name: install git
+      yum: name=git state=installed
+
+********when condition********
+---
+- hosts: all
+  tasks:
+    - name: install httpd
+      yum: name=httpd state=installed
+      when: ansible_os_family == "RedHat"
+---
+- hosts: all
+  tasks:
+    - name: install httpd
+      yum: name=httpd state=installed
+      when:
+        - ansible_facts['distribution'] == "Amazon"
+        - ansible_facts['distribution_major_version'] == "2"
+
+
+**note: 1. don't use 'ansible_distribution' 
+        2. ansible gets/gathers information from running setup module in agent servers/vms 
+
+********register********
+---
+- hosts: [dev]
+  tasks:
+    - name: checking file details
+      file: name=/tmp/file1 state=touch
+      register: output
+    - debug: 
+        var: output
+or
+---
+- hosts: [dev]
+  tasks:
+    - name: checking file details
+      file: name=/tmp/file1 state=touch
+      register: output
+    - debug: var=output
+
+********failed_when condition********
+---
+- hosts: all
+  tasks:
+    - name: to know available storage
+      shell: df -h /|grep -vi filesystem|awk '{print $4}'|sed 's/[A-Z]//g'
+      register: availspace
+    - name: install docker if avaiable storage is more than 1GB
+      yum: name=docker state=installed
+      failed_when: availspace.stdout|float < 1
+    - debug: var=availspace.stdout
+
+or
+---
+- hosts: all
+  tasks:
+    - name: to know available RAM memory
+      shell: free -m|grep -i mem|awk '{print $7/1024}'
+      register: availmem
+    - name: install docker if avaiable storage is more than 1GB
+      yum: name=docker state=installed
+      failed_when: availmem.stdout|float < 1
+    - debug: var=availmem.stdout
+
+or
+To know avaiable RAM in GB: cat /proc/meminfo|grep -i memavailable|awk '{print $2/1024/1024}'
+
+********handler********
+---
+- hosts: all
+  tasks:
+    - name: install httpd
+      yum: name=httpd state=installed
+    - name: start httpd service
+      service: name=httpd state=started
+    - name: copy httpd.conf file
+      copy: src=/tmp/httpd.conf dest=/etc/httpd/conf/
+      notify: restart service
+  handlers:
+    - name: restart service
+      service: name=httpd state=restarted
+
+-> change default port 80 to 100
+# vi /tmp/httpd.conf
+.
+.
+Listen 100
+.
+.
+:wq
+# ansible-playbook playbook.yaml
+-> open port 100 in sg of VM
+  
+********templates********
+vi /tmp/httpd.conf
+.
+.
+Listen {{ port }}
+.
+.
+User {{ username }}
+Group {{ groupname }}
+.
+.
+:wq
+# vi playbook.yaml
+---
+- hosts: all
+  tasks:
+    - name: install httpd
+      yum: name=httpd state=installed
+    - name: start httpd servive
+      service: name=httpd state=started
+    - name: copy httpd.conf
+      template: src=/tmp/httpd.conf dest=/etc/httpd/conf/
+      notify: restart service
+  handlers:
+    - name: restart service
+      service: name=httpd state=restarted
+:wq
+# ansible-playbook playbook.yaml -e port=100 -e username=apache -e groupname=apache
+
+********roles********
+~]# cd /etc/ansible/roles
+roles]# ansible-galaxy init web
+- Role web was created successfully
+roles]# ls
+web
+roles]# cd web/
+web]# ls
+defaults  files  handlers  meta  README.md  tasks  templates  tests  vars
+web]# cd tasks
+tasks]# ls
+main.yml
+tasks]# vi main.yml
+---
+# tasks file for web
+- name: install httpd
+  yum: name=httpd state=installed
+- name: start httpd service
+  service: name=httpd state=started
+- name: copy httpd.conf
+  template: src=/tmp/httpd.conf dest=/etc/httpd/conf/
+  notify: restart service
+:wq
+[root@master tasks]# cd ..
+[root@master web]# ls
+defaults  files  handlers  meta  README.md  tasks  templates  tests  vars
+[root@master web]# cd handlers/
+[root@master handlers]# ls
+main.yml
+handlers]# vi main.yml
+---
+# handlers file for web
+- name: restart service
+  service: name=httpd state=restarted
+:wq
+handlers]# cd ..
+web]# ls
+defaults  files  handlers  meta  README.md  tasks  templates  tests  vars
+web]# cp /etc/httpd/conf/httpd.conf templates/
+web]# cd templates/
+templates]# ls
+httpd.conf
+templates]# vi httpd.conf
+.
+.
+Listen {{ port }}
+.
+.
+User {{ username }}
+Group {{ groupname }}
+.
+.
+:wq
+templates]# cd ../../..
+ansible]# vi playbook.yaml
+---
+- hosts: all
+  tasks:
+    - name: create a user hailee
+      user: name=hailee state=present
+    - name: install git
+      yum: name=git state=installed
+  roles:
+    - web
+:wq
+ansible]# ansible-playbook playbook.yaml -e port=100 -e username=apache -e groupname=apache
+[WARNING]: Found variable using reserved name: port
+
+PLAY [all] ********************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************
+ok: [3.110.54.255]
+
+TASK [web : install httpd] ****************************************************************************
+ok: [3.110.54.255]
+
+TASK [web : start httpd service] **********************************************************************
+ok: [3.110.54.255]
+
+TASK [web : copy httpd.conf] **************************************************************************
+changed: [3.110.54.255]
+
+TASK [create a user hailee] ***************************************************************************
+ok: [3.110.54.255]
+
+TASK [install git] ************************************************************************************
+ok: [3.110.54.255]
+
+RUNNING HANDLER [web : restart service] ***************************************************************
+changed: [3.110.54.255]
+
+PLAY RECAP ********************************************************************************************
+3.110.54.255               : ok=7    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+
+**note:dont use tabs, use spaces
